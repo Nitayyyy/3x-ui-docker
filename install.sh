@@ -12,7 +12,7 @@ echo "2. Включит алгоритм BBR для ускорения сети"
 echo "3. Установит и настроит Fail2ban (защита от брутфорса)"
 echo "4. Установит фаервол UFW и откроет порты 22, 80, 443 и 2055"
 echo "5. Установит Docker и Docker Compose"
-echo "6. Выпустит SSL-сертификат Let's Encrypt на 90 дней (до запуска панели)"
+echo "6. Выпустит SSL-сертификат Let's Encrypt на 90 дней (или оставит старый)"
 echo "7. Развернет 3x-ui (база SQLite) в Docker-контейнере"
 echo "8. Сгенерирует пароль, привяжет сертификат и настроит путь /black/"
 echo ""
@@ -29,7 +29,6 @@ read -rp "Введите вашу почту (для выпуска Let's Encryp
 
 # ================= ПАРАМЕТРЫ ПАНЕЛИ =================
 XUI_USER="admin"
-# Генерация пароля: 15 символов, большие буквы, цифры, и символы !@#
 XUI_PASS=$(LC_ALL=C tr -dc 'A-Z0-9!@#' < /dev/urandom | head -c 15)
 XUI_PORT="2055"
 XUI_PATH="/black/"
@@ -94,17 +93,17 @@ if ! docker compose version &> /dev/null; then
     apt-get install -y docker-compose-plugin
 fi
 
-# ================= SSL СЕРТИФИКАТ (ДО ЗАПУСКА) =================
+# ================= SSL СЕРТИФИКАТ =================
 echo -e "\n${GREEN}Получение SSL-сертификата Let's Encrypt...${NC}"
 mkdir -p /opt/3x-ui/cert
 mkdir -p /opt/3x-ui/db
 
-if docker run -it --rm -p 80:80 -v /opt/3x-ui/cert:/etc/letsencrypt certbot/certbot certonly --standalone --agree-tos --no-eff-email -d "$DOMAIN" -m "$EMAIL"; then
-    echo -e "${GREEN}Сертификат успешно выпущен!${NC}"
+if docker run --rm -p 80:80 -v /opt/3x-ui/cert:/etc/letsencrypt certbot/certbot certonly --standalone --agree-tos --no-eff-email --non-interactive --keep-until-expiring -d "$DOMAIN" -m "$EMAIL"; then
+    echo -e "${GREEN}Сертификат успешно проверен/выпущен!${NC}"
     DOCKER_CERT_PATH="/cert/live/$DOMAIN/fullchain.pem"
     DOCKER_KEY_PATH="/cert/live/$DOMAIN/privkey.pem"
 else
-    echo -e "${RED}Ошибка выпуска сертификата! Убедитесь, что домен привязан к IP. Скрипт прерван.${NC}"
+    echo -e "${RED}Ошибка выпуска сертификата! Убедитесь, что домен привязан к IP и порт 80 свободен. Скрипт прерван.${NC}"
     exit 1
 fi
 
@@ -132,11 +131,13 @@ docker compose up -d
 echo -e "\n${GREEN}Ожидание 10 секунд для инициализации базы данных...${NC}"
 sleep 10
 
-echo -e "\n${GREEN}Применение порта, пути, пароля и сертификатов...${NC}"
-# ОДНА ПРАВИЛЬНАЯ КОМАНДА ДЛЯ ВСЕХ НАСТРОЕК
-docker exec 3x-ui x-ui setting -username "${XUI_USER}" -password "${XUI_PASS}" -port "${XUI_PORT}" -webBasePath "${XUI_PATH}" -webCert "${DOCKER_CERT_PATH}" -webCertKey "${DOCKER_KEY_PATH}" >/dev/null 2>&1
+echo -e "\n${GREEN}Применение настроек...${NC}"
+# Применяем настройки по очереди с правильными флагами!
+docker exec 3x-ui /app/x-ui setting -username "${XUI_USER}" -password "${XUI_PASS}"
+docker exec 3x-ui /app/x-ui setting -port "${XUI_PORT}"
+docker exec 3x-ui /app/x-ui setting -webBasePath "${XUI_PATH}"
+docker exec 3x-ui /app/x-ui setting -webCertFile "${DOCKER_CERT_PATH}" -webKeyFile "${DOCKER_KEY_PATH}"
 
-# Обязательный перезапуск контейнера для применения SSL
 docker restart 3x-ui >/dev/null 2>&1
 
 echo -e "\n${GREEN}Установка полностью завершена!${NC}"
