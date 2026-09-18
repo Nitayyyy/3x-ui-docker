@@ -6,7 +6,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${YELLOW}Установщик 3x-ui в Docker${NC}"
+echo -e "${YELLOW}Установщик 3x-ui в Docker c автообновлением SSL раз в 2 месяца${NC}"
 echo "Параметры: Swap 2G, BBR, Fail2ban, UFW (22, 80, 443, 2055), SQLite, SSL"
 echo ""
 
@@ -105,7 +105,7 @@ if ! docker compose version &> /dev/null; then
     apt-get install -y docker-compose-plugin >/dev/null 2>&1
 fi
 
-# ================= 8. ВЫПУСК SSL (ПРИ НЕОБХОДИМОСТИ) =================
+# ================= 8. ВЫПУСК SSL =================
 mkdir -p /opt/3x-ui/cert
 mkdir -p /opt/3x-ui/db
 
@@ -147,12 +147,10 @@ sleep 8
 
 # ================= 10. ПРИМЕНЕНИЕ НАСТРОЕК =================
 echo -e "${GREEN}Применение настроек панели...${NC}"
-# 1. Логин, пароль, порт и путь
 docker exec 3x-ui /app/x-ui setting -username "${XUI_USER}" -password "${XUI_PASS}" >/dev/null 2>&1
 docker exec 3x-ui /app/x-ui setting -port "${XUI_PORT}" >/dev/null 2>&1
 docker exec 3x-ui /app/x-ui setting -webBasePath "${XUI_PATH}" >/dev/null 2>&1
 
-# 2. Прописываем пути СТРОГО через интерактивное меню (20 -> 5 -> 2)
 echo -e "${GREEN}Привязка сертификата через меню панели (20 -> 5)...${NC}"
 docker exec -i 3x-ui x-ui <<EOF >/dev/null 2>&1
 20
@@ -164,11 +162,18 @@ ${DOCKER_KEY_PATH}
 0
 EOF
 
-# 3. Перезапуск контейнера для применения
 docker restart 3x-ui >/dev/null 2>&1
+
+# ================= 11. АВТООБНОВЛЕНИЕ РАЗ В 2 МЕСЯЦА =================
+echo -e "${GREEN}Настройка автопродления сертификата (раз в 2 месяца)...${NC}"
+cat << 'EOF' > /etc/cron.d/certbot-3xui
+0 3 1 */2 * root docker run --rm -p 80:80 -v /opt/3x-ui/cert:/etc/letsencrypt certbot/certbot renew --quiet && docker restart 3x-ui >/dev/null 2>&1
+EOF
+chmod 644 /etc/cron.d/certbot-3xui
 
 echo ""
 echo -e "${GREEN}Установка полностью завершена!${NC}"
-echo -e "Адрес панели: ${YELLOW}https://${DOMAIN}:${XUI_PORT}${XUI_PATH}${NC}"
-echo -e "Логин:        ${YELLOW}${XUI_USER}${NC}"
-echo -e "Пароль:       ${YELLOW}${XUI_PASS}${NC}"
+echo -e "Адрес панели:      ${YELLOW}https://${DOMAIN}:${XUI_PORT}${XUI_PATH}${NC}"
+echo -e "Логин:             ${YELLOW}${XUI_USER}${NC}"
+echo -e "Пароль:            ${YELLOW}${XUI_PASS}${NC}"
+echo -e "Автопродление SSL: ${GREEN}Включено (ровно 1 раз в 2 месяца, 1-го числа в 03:00)${NC}"
