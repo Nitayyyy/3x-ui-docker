@@ -12,7 +12,7 @@ echo "2. Включит алгоритм BBR для ускорения сети"
 echo "3. Установит и настроит Fail2ban (защита от брутфорса)"
 echo "4. Установит фаервол UFW и откроет порты 22, 80, 443 и 2055"
 echo "5. Установит Docker и Docker Compose"
-echo "6. Выпустит SSL-сертификат Let's Encrypt на 90 дней (или оставит старый)"
+echo "6. Выпустит SSL-сертификат Let's Encrypt на 90 дней (или использует готовый)"
 echo "7. Развернет 3x-ui (база SQLite) в Docker-контейнере"
 echo "8. Сгенерирует пароль, привяжет сертификат и настроит путь /black/"
 echo ""
@@ -23,11 +23,11 @@ if [[ ! "$START_INSTALL" =~ ^[Yy]$ ]]; then
     exit 1
 fi
 
-# ================= ЗАПРОС ДАННЫХ =================
+# ================= 1. ЗАПРОС ДАННЫХ =================
 read -rp "Введите ваш домен (он должен быть уже привязан к IP сервера): " DOMAIN
 read -rp "Введите вашу почту (для выпуска Let's Encrypt): " EMAIL
 
-# ================= ПАРАМЕТРЫ ПАНЕЛИ =================
+# ================= 2. ПАРАМЕТРЫ ПАНЕЛИ =================
 XUI_USER="admin"
 XUI_PASS=$(LC_ALL=C tr -dc 'A-Z0-9!@#' < /dev/urandom | head -c 15)
 XUI_PORT="2055"
@@ -36,7 +36,7 @@ XUI_PATH="/black/"
 echo -e "\n${GREEN}Обновление списков пакетов...${NC}"
 apt-get update -y
 
-# ================= SWAP =================
+# ================= 3. SWAP =================
 echo -e "\n${GREEN}Настройка файла подкачки (Swap) 2GB...${NC}"
 if [ ! -f /swapfile ]; then
     fallocate -l 2G /swapfile
@@ -48,7 +48,7 @@ else
     echo -e "${YELLOW}Файл подкачки уже существует, пропускаем.${NC}"
 fi
 
-# ================= BBR =================
+# ================= 4. BBR =================
 echo -e "\n${GREEN}Включение алгоритма BBR...${NC}"
 if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
     echo "net.core.default_qdisc=fq" | tee -a /etc/sysctl.conf
@@ -58,7 +58,7 @@ else
     echo -e "${YELLOW}BBR уже включен, пропускаем.${NC}"
 fi
 
-# ================= FAIL2BAN =================
+# ================= 5. FAIL2BAN =================
 echo -e "\n${GREEN}Установка и настройка Fail2ban...${NC}"
 apt-get install -y fail2ban
 cat << 'EOF' > /etc/fail2ban/jail.local
@@ -73,7 +73,7 @@ EOF
 systemctl enable fail2ban
 systemctl restart fail2ban
 
-# ================= UFW =================
+# ================= 6. UFW =================
 echo -e "\n${GREEN}Настройка фаервола UFW...${NC}"
 apt-get install -y ufw
 ufw allow ssh
@@ -83,7 +83,7 @@ ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable
 
-# ================= DOCKER =================
+# ================= 7. DOCKER =================
 echo -e "\n${GREEN}Установка Docker...${NC}"
 if ! command -v docker &> /dev/null; then
     curl -fsSL https://get.docker.com | bash
@@ -93,7 +93,7 @@ if ! docker compose version &> /dev/null; then
     apt-get install -y docker-compose-plugin
 fi
 
-# ================= SSL СЕРТИФИКАТ =================
+# ================= 8. SSL СЕРТИФИКАТ =================
 echo -e "\n${GREEN}Получение SSL-сертификата Let's Encrypt...${NC}"
 mkdir -p /opt/3x-ui/cert
 mkdir -p /opt/3x-ui/db
@@ -107,7 +107,7 @@ else
     exit 1
 fi
 
-# ================= РАЗВЕРТЫВАНИЕ 3X-UI =================
+# ================= 9. РАЗВЕРТЫВАНИЕ 3X-UI =================
 echo -e "\n${GREEN}Создание конфигурации Docker Compose...${NC}"
 cd /opt/3x-ui
 cat << EOF > docker-compose.yml
@@ -131,13 +131,14 @@ docker compose up -d
 echo -e "\n${GREEN}Ожидание 10 секунд для инициализации базы данных...${NC}"
 sleep 10
 
-echo -e "\n${GREEN}Применение настроек...${NC}"
-# Применяем настройки по очереди с правильными флагами!
-docker exec 3x-ui /app/x-ui setting -username "${XUI_USER}" -password "${XUI_PASS}"
-docker exec 3x-ui /app/x-ui setting -port "${XUI_PORT}"
-docker exec 3x-ui /app/x-ui setting -webBasePath "${XUI_PATH}"
-docker exec 3x-ui /app/x-ui setting -webCert "${DOCKER_CERT_PATH}" -webCertKey "${DOCKER_KEY_PATH}"
+# ================= 10. ПРИМЕНЕНИЕ НАСТРОЕК =================
+echo -e "\n${GREEN}Применение настроек панели...${NC}"
+docker exec 3x-ui x-ui setting -username "${XUI_USER}" -password "${XUI_PASS}"
+docker exec 3x-ui x-ui setting -port "${XUI_PORT}"
+docker exec 3x-ui x-ui setting -webBasePath "${XUI_PATH}"
+docker exec 3x-ui x-ui setting -webCert "${DOCKER_CERT_PATH}" -webCertKey "${DOCKER_KEY_PATH}"
 
+# Обязательный перезапуск контейнера для включения SSL
 docker restart 3x-ui >/dev/null 2>&1
 
 echo -e "\n${GREEN}Установка полностью завершена!${NC}"
