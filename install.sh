@@ -136,7 +136,7 @@ echo -e "\n${GREEN}Применение настроек...${NC}"
 docker exec 3x-ui /app/x-ui setting -username "${XUI_USER}" -password "${XUI_PASS}"
 docker exec 3x-ui /app/x-ui setting -port "${XUI_PORT}"
 docker exec 3x-ui /app/x-ui setting -webBasePath "${XUI_PATH}"
-docker exec 3x-ui /app/x-ui setting -webCertFile "${DOCKER_CERT_PATH}" -webKeyFile "${DOCKER_KEY_PATH}"
+docker exec 3x-ui /app/x-ui setting -webCert "${DOCKER_CERT_PATH}" -webCertKey "${DOCKER_KEY_PATH}"
 
 docker restart 3x-ui >/dev/null 2>&1
 
