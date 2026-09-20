@@ -71,7 +71,7 @@ if [[ "$ASK_SSL" =~ ^[Yy]$ ]]; then
     ASK_NGINX=${ASK_NGINX:-y}
     if [[ "$ASK_NGINX" =~ ^[Yy]$ ]]; then
         INSTALL_NGINX=true
-        BIND_CERT=false # TLS расшифровывает Nginx, панель остается на чистом HTTP
+        BIND_CERT=false
     else
         INSTALL_NGINX=false
         read -rp "Привязать SSL напрямую к панели 3x-ui? (y - HTTPS / n - голый HTTP) [y]: " ASK_BIND
@@ -125,7 +125,7 @@ fs.file-max = 1000000
 EOF
 sysctl --system >/dev/null 2>&1
 
-# Быстрый и чистый DNS для самого сервера
+# Быстрый DNS для самого сервера
 cat << 'EOF' > /etc/resolv.conf
 nameserver 1.1.1.1
 nameserver 8.8.8.8
@@ -149,8 +149,8 @@ ufw allow ssh >/dev/null 2>&1
 ufw allow 22/tcp >/dev/null 2>&1
 ufw allow 80/tcp >/dev/null 2>&1
 ufw allow 443/tcp >/dev/null 2>&1
-ufw allow 443/udp >/dev/null 2>&1    # Hysteria 2
-ufw allow 56100/udp >/dev/null 2>&1  # AmneziaWG
+ufw allow 443/udp >/dev/null 2>&1
+ufw allow 56100/udp >/dev/null 2>&1
 
 if [ "$INSTALL_NGINX" = false ]; then
     ufw allow "${XUI_PORT}"/tcp >/dev/null 2>&1
@@ -200,17 +200,25 @@ EOF
 
 docker compose pull >/dev/null 2>&1
 docker compose up -d >/dev/null 2>&1
-sleep 8
 
+# ================= 5. ПРИМЕНЕНИЕ НАСТРОЕК УЧЕТНОЙ ЗАПИСИ =================
 echo -e "\n${GREEN}[4/6] Применение настроек учетной записи и портов...${NC}"
-docker exec 3x-ui /app/x-ui setting -username "${XUI_USER}" -password "${XUI_PASS}" >/dev/null 2>&1
-docker exec 3x-ui /app/x-ui setting -port "${XUI_PORT}" >/dev/null 2>&1
-docker exec 3x-ui /app/x-ui setting -webBasePath "${XUI_PATH}" >/dev/null 2>&1
+
+# Ожидание готовности x-ui внутри контейнера
+for i in {1..20}; do
+    if docker exec 3x-ui /app/x-ui setting -username "${XUI_USER}" -password "${XUI_PASS}" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+
+docker exec 3x-ui /app/x-ui setting -port "${XUI_PORT}" >/dev/null 2>&1 || true
+docker exec 3x-ui /app/x-ui setting -webBasePath "${XUI_PATH}" >/dev/null 2>&1 || true
 
 if [ "$BIND_CERT" = true ]; then
     DOCKER_CERT_PATH="/cert/live/$DOMAIN/fullchain.pem"
     DOCKER_KEY_PATH="/cert/live/$DOMAIN/privkey.pem"
-    docker exec -i 3x-ui x-ui <<EOF >/dev/null 2>&1
+    docker exec -i 3x-ui x-ui <<EOF >/dev/null 2>&1 || true
 20
 5
 2
@@ -222,7 +230,6 @@ EOF
     PANEL_PROTO="https"
     PANEL_HOST="${DOMAIN}:${XUI_PORT}"
 else
-    docker exec 3x-ui /app/x-ui setting -webCert "" -webKey "" >/dev/null 2>&1
     PANEL_PROTO="http"
     if [ -n "$DOMAIN" ]; then
         PANEL_HOST="${DOMAIN}:${XUI_PORT}"
@@ -232,7 +239,7 @@ else
 fi
 docker restart 3x-ui >/dev/null 2>&1
 
-# ================= 5. УСТАНОВКА NGINX (ЕСЛИ ВЫБРАНО) =================
+# ================= 6. УСТАНОВКА NGINX (ЕСЛИ ВЫБРАНО) =================
 if [ "$INSTALL_NGINX" = true ]; then
     echo -e "\n${GREEN}[5/6] Настройка и запуск Nginx с обфускацией и маскировкой...${NC}"
     mkdir -p /opt/nginx
@@ -358,7 +365,7 @@ http {
             grpc_pass grpc://127.0.0.1:36491;
         }
 
-        # Заглушка (маскировка под закрытый API)
+        # Заглушка
         location / {
             return 401;
         }
@@ -377,7 +384,7 @@ EOF
     PANEL_HOST="${DOMAIN}"
 fi
 
-# ================= 6. СОЗДАНИЕ XRAY-PASTE.TXT =================
+# ================= 7. СОЗДАНИЕ XRAY-PASTE.TXT =================
 echo -e "\n${GREEN}[6/6] Создание эталонного файла конфигурации ядра /opt/3x-ui/xray-paste.txt...${NC}"
 cat << 'EOF' > /opt/3x-ui/xray-paste.txt
 {
@@ -514,7 +521,7 @@ EOF
     chmod 644 /etc/cron.d/certbot-3xui
 fi
 
-# ================= 7. ФИНАЛЬНЫЙ ОТЧЁТ =================
+# ================= 8. ФИНАЛЬНЫЙ ОТЧЁТ =================
 echo ""
 echo -e "${GREEN}====================================================${NC}"
 echo -e "${GREEN}       УСТАНОВКА УСПЕШНО ЗАВЕРШЕНА!                 ${NC}"
